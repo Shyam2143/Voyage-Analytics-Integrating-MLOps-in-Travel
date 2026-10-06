@@ -1,0 +1,14 @@
+# A Service gives the application a stable network address inside Kubernetes.
+apiVersion: v1
+kind: Service
+metadata:
+  # Name used to reach the application inside the cluster.
+  name: flight-price-api
+spec:
+  selector:
+    # Send traffic to Pods with this label.
+    app: flight-price-api
+  ports:
+    # Service port : application container port
+    - port: 8000
+      targetPort: 8000

@@ -1,0 +1,29 @@
+# A Deployment runs and keeps the application container alive.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Name of this Kubernetes deployment.
+  name: flight-price-api
+spec:
+  # Run one copy of the application.
+  replicas: 1
+  selector:
+    # Find Pods with this label.
+    matchLabels:
+      app: flight-price-api
+  template:
+    metadata:
+      labels:
+        # This label connects the Deployment to the Service.
+        app: flight-price-api
+    spec:
+      containers:
+        # The application container.
+        - name: flight-price-api
+          # Image downloaded from Docker Hub.
+          image: dmcshyam/flight-price-predictor:latest
+          # Download the newest image when a Pod starts.
+          imagePullPolicy: Always
+          ports:
+            # The port used by the application inside the container.
+            - containerPort: 8000

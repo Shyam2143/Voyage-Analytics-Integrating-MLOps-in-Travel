@@ -1,0 +1,7 @@
+services:
+  flight-price-api:
+    build: .
+    image: flight-price-predictor:latest
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

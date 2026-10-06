@@ -3,33 +3,32 @@
 Flight Price Predictor - Flask REST API + HTML UI
 """
 
-import os, json, logging
+import logging
+import os
+from datetime import date
 import joblib
 import pandas as pd
 from flask import Flask, render_template_string, request, jsonify
 
-# ── Logging ──────────────────────────────────────────────────────────────
+# Print useful messages in the terminal while the app is running.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 1. CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════
-MODEL_PATH   = os.path.join(os.path.dirname(__file__), "best_flight_price_model.joblib")
-HOST         = "0.0.0.0"
-PORT         = 8000
+# --- App settings ---------------------------------------------------------
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "best_flight_price_model.joblib")
+HOST = "0.0.0.0"
+PORT = 8000
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 2. LOAD THE TRAINED MODEL
-# ════════════════════
-model = None
+# Load the machine-learning model once, when this file starts.
+flight_price_model = None
 try:
-    model = joblib.load(MODEL_PATH)
+    flight_price_model = joblib.load(MODEL_PATH)
     log.info("Model loaded from %s", MODEL_PATH)
 except Exception as exc:
     log.error("Could not load model: %s", exc)
 
-# ── Exact column schema the model was trained on (EXCLUDES 'price') ──────
+# The model was trained with these 30 columns, in exactly this order.
+# Do not remove or reorder them unless the model is trained again.
 FEATURE_COLUMNS = [
     "time", "distance", "month", "day", "day_of_week", "is_weekend",
     "from_Aracaju (SE)", "from_Brasilia (DF)", "from_Campo Grande (MS)",
@@ -44,11 +43,58 @@ FEATURE_COLUMNS = [
     "agency_FlyingDrops", "agency_Rainbow",
 ]
 
-CITIES = [
-    "Aracaju (SE)", "Brasilia (DF)", "Campo Grande (MS)",
-    "Florianopolis (SC)", "Natal (RN)", "Recife (PE)",
-    "Rio de Janeiro (RJ)", "Salvador (BH)", "Sao Paulo (SP)",
-]
+# During training, pandas turned each text value into columns such as
+# "agency_Rainbow" and "flightType_economic". This dictionary tells the app
+# how a form field maps to those columns.
+FORM_FIELD_PREFIXES = {
+    "from_city": "from_",
+    "destination": "destination_",
+    "flightType": "flightType_",
+    "agency": "agency_",
+}
+
+
+def get_dropdown_options(field_name):
+    """Find valid dropdown values from the model's feature-column names."""
+    prefix = FORM_FIELD_PREFIXES[field_name]
+    return [column.removeprefix(prefix) for column in FEATURE_COLUMNS if column.startswith(prefix)]
+
+
+FORM_OPTIONS = {
+    field_name: get_dropdown_options(field_name)
+    for field_name in FORM_FIELD_PREFIXES
+}
+
+
+def create_model_input(form_data):
+    """Convert simple form values into the numeric row required by the model."""
+    try:
+        selected_date = date.fromisoformat(str(form_data["travel_date"]))
+        values = {
+            "time": float(form_data["time"]),
+            "distance": float(form_data["distance"]),
+            "month": selected_date.month,
+            "day": selected_date.day,
+            "day_of_week": selected_date.weekday(),
+            "is_weekend": int(selected_date.weekday() >= 5),
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Enter a valid date, time, and distance.") from exc
+
+    # One-hot encoding in plain language:
+    #   1. Every category column starts as 0.
+    #   2. The column for the user's selected option becomes 1.
+    for field_name, prefix in FORM_FIELD_PREFIXES.items():
+        selected_value = form_data.get(field_name)
+        selected_column = f"{prefix}{selected_value}"
+        if selected_column not in FEATURE_COLUMNS:
+            friendly_name = field_name.replace("_", " ")
+            raise ValueError(f"Choose a valid {friendly_name}.")
+        values[selected_column] = 1
+
+    # Missing columns become 0. columns=FEATURE_COLUMNS also keeps the order
+    # identical to the data used when the model was trained.
+    return pd.DataFrame([values], columns=FEATURE_COLUMNS).fillna(0)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. EMBEDDED HTML UI  (responsive, accessible)
@@ -177,29 +223,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <input type="number" name="distance" step="0.01" required placeholder="e.g. 850.0">
                     </div>
                     <div>
-                        <label>Month</label>
-                        <input type="number" name="month" min="1" max="12" required placeholder="1–12">
-                    </div>
-                    <div>
-                        <label>Day (day-of-year ID)</label>
-                        <input type="number" name="day" required placeholder="e.g. 180">
-                    </div>
-                    <div>
-                        <label>Day of Week (0=Mon … 6=Sun)</label>
-                        <input type="number" name="day_of_week" min="0" max="6" required placeholder="0–6">
-                    </div>
-                    <div>
-                        <label>Is Weekend?</label>
-                        <select name="is_weekend" required>
-                            <option value="0">No</option>
-                            <option value="1">Yes</option>
-                        </select>
+                        <label>Travel Date</label>
+                        <input type="date" name="travel_date" required>
                     </div>
                     <div>
                         <label>Origin City</label>
                         <select name="from_city" required>
                             <option value="">Choose …</option>
-                            {% for c in cities %}
+                            {% for c in choices.from_city %}
                             <option value="{{ c }}">{{ c }}</option>
                             {% endfor %}
                         </select>
@@ -208,7 +239,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <label>Destination City</label>
                         <select name="destination" required>
                             <option value="">Choose …</option>
-                            {% for c in cities %}
+                            {% for c in choices.destination %}
                             <option value="{{ c }}">{{ c }}</option>
                             {% endfor %}
                         </select>
@@ -217,18 +248,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <label>Flight Type</label>
                         <select name="flightType" required>
                             <option value="">Choose …</option>
-                            <option value="economic">Economic</option>
-                            <option value="firstClass">First Class</option>
-                            <option value="premium">Premium</option>
+                            {% for option in choices.flightType %}
+                            <option value="{{ option }}">{{ option }}</option>
+                            {% endfor %}
                         </select>
                     </div>
                     <div>
                         <label>Agency</label>
                         <select name="agency" required>
                             <option value="">Choose …</option>
-                            <option value="CloudFy">CloudFy</option>
-                            <option value="FlyingDrops">FlyingDrops</option>
-                            <option value="Rainbow">Rainbow</option>
+                            {% for option in choices.agency %}
+                            <option value="{{ option }}">{{ option }}</option>
+                            {% endfor %}
                         </select>
                     </div>
                 </div>
@@ -253,9 +284,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const fd = new FormData(form);
             const payload = {};
             for (const [k, v] of fd.entries()) {
-                if (['month','day','day_of_week','is_weekend'].includes(k))
-                    payload[k] = parseInt(v, 10);
-                else if (['time','distance'].includes(k))
+                if (['time','distance'].includes(k))
                     payload[k] = parseFloat(v);
                 else
                     payload[k] = v;
@@ -296,8 +325,8 @@ app = Flask(__name__)
 def home():
     return render_template_string(
         HTML_TEMPLATE,
-        model_loaded=model is not None,
-        cities=CITIES,
+        model_loaded=flight_price_model is not None,
+        choices=FORM_OPTIONS,
     )
 
 
@@ -305,7 +334,7 @@ def home():
 def health():
     return jsonify({
         "status": "healthy",
-        "model_loaded": model is not None,
+        "model_loaded": flight_price_model is not None,
         "model_path": MODEL_PATH,
         "features": len(FEATURE_COLUMNS),
     })
@@ -313,58 +342,28 @@ def health():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    if model is None:
+    if flight_price_model is None:
         return jsonify({"error": "Model not loaded"}), 503
 
     try:
-        data = request.get_json(force=True)
+        form_data = request.get_json(silent=True)
+        if not isinstance(form_data, dict):
+            return jsonify({"error": "Send a JSON object."}), 400
 
-        # Build one-hot row
-        row = {col: 0 for col in FEATURE_COLUMNS}
+        model_input = create_model_input(form_data)
+        # The saved model was trained with an array, so send the values only.
+        # create_model_input has already put them in the correct column order.
+        predicted_price = float(flight_price_model.predict(model_input.to_numpy())[0])
 
-        # Numeric / boolean
-        row["time"]        = float(data.get("time", 0))
-        row["distance"]    = float(data.get("distance", 0))
-        row["month"]       = int(data.get("month", 0))
-        row["day"]         = int(data.get("day", 0))
-        row["day_of_week"] = int(data.get("day_of_week", 0))
-        row["is_weekend"]  = int(data.get("is_weekend", 0))
-
-        # Origin city
-        fc = data.get("from_city")
-        if fc:
-            col = f"from_{fc}"
-            if col in row:
-                row[col] = 1
-
-        # Destination city
-        dc = data.get("destination")
-        if dc:
-            col = f"destination_{dc}"
-            if col in row:
-                row[col] = 1
-
-        # Flight type
-        ft = data.get("flightType")
-        if ft:
-            col = f"flightType_{ft}"
-            if col in row:
-                row[col] = 1
-
-        # Agency
-        ag = data.get("agency")
-        if ag:
-            col = f"agency_{ag}"
-            if col in row:
-                row[col] = 1
-
-        df = pd.DataFrame([row])[FEATURE_COLUMNS]
-        pred = float(model.predict(df)[0])
+        origin = form_data["from_city"]
+        destination = form_data["destination"]
+        flight_type = form_data["flightType"]
+        agency = form_data["agency"]
 
         log.info("Prediction: %.2f | from=%s → to=%s | class=%s | agency=%s",
-                 pred, fc, dc, ft, ag)
+                 predicted_price, origin, destination, flight_type, agency)
 
-        return jsonify({"predicted_price": round(pred, 2)})
+        return jsonify({"predicted_price": round(predicted_price, 2)})
 
     except Exception as exc:
         log.exception("Prediction error")
@@ -379,6 +378,6 @@ if __name__ == "__main__":
     print("FLIGHT PRICE PREDICTOR")
     print("=" * 60)
     print(f"Local URL  : http://{HOST}:{PORT}")
-    print(f"Model      : {MODEL_PATH}  {'loaded' if model else 'MISSING'}")
+    print(f"Model      : {MODEL_PATH}  {'loaded' if flight_price_model else 'MISSING'}")
     print("=" * 60)
     app.run(host=HOST, port=PORT, debug=False)
