@@ -1,6 +1,11 @@
 # Flight Price Prediction
 
-A flight-price regression service with model training, experiment tracking, and a Flask prediction API. The training workflow compares baseline regressors, runs cross-validation and hyperparameter searches, then saves a tuned Random Forest model.
+A flight-price regression service with model training, MLflow experiment
+tracking, and a Flask prediction API. Training compares baseline regressors,
+runs cross-validation and hyperparameter searches, then saves a tuned Random
+Forest model.
+
+From the repository overview, see the [root README](../README.md).
 
 ## Requirements
 
@@ -8,7 +13,8 @@ A flight-price regression service with model training, experiment tracking, and 
 - Python 3.12 for running training directly
 - The flight dataset at `../DATA/flights.csv` relative to this project directory
 
-Set `FLIGHT_PRICE_DATASET_PATH` to use a different dataset file.
+Set `FLIGHT_PRICE_DATASET_PATH` to use a different dataset file. By default,
+training reads `../DATA/flights.csv` relative to this directory.
 
 ## Run with Docker
 
@@ -54,7 +60,9 @@ docker compose up -d mlflow
 MLFLOW_TRACKING_URI=http://localhost:5001 python src/train_model.py
 ```
 
-The default dataset path is `../DATA/flights.csv`. Local runs without `MLFLOW_TRACKING_URI` use `mlflow.db` in this directory, which is separate from the Compose MLflow store. To view local runs in the Compose UI, set the tracking URI as shown above.
+Local runs without `MLFLOW_TRACKING_URI` use `mlflow.db` in this directory,
+which is separate from the Compose MLflow store. To view local runs in the
+Compose UI, set the tracking URI as shown above.
 
 ## MLflow Contents
 
@@ -70,3 +78,10 @@ This predicts a continuous price, so regression metrics are used instead of a cl
 - `artifacts/`: saved model used by the API
 - `docker-compose.yml`: API, Airflow, and MLflow services
 - `DOCKER.md`: additional Docker startup notes
+- `KUBERNETES.md`: Kubernetes deployment instructions
+
+## Kubernetes
+
+The Kubernetes manifests deploy the prediction API image from Docker Hub. See
+[KUBERNETES.md](KUBERNETES.md) for deployment, port-forwarding, scaling, and
+cleanup commands.
