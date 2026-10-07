@@ -24,6 +24,11 @@ check the dataset and train the model. Airflow writes the trained model into
 `artifacts/best_flight_price_model.joblib`; restart the API container after
 training so it loads the new model:
 
+MLflow's experiment UI is available at <http://localhost:5001>. Open the
+`flight-price-prediction` experiment to compare model runs, parameters, metrics,
+training logs, reports, and model artifacts. MLflow data is kept in the
+`mlflow-data` Docker volume.
+
 ```bash
 docker compose restart flight-price-api
 ```

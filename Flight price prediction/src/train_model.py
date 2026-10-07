@@ -1,10 +1,13 @@
 """Train and save the notebook's flight-price regression model."""
 
+import io
 import logging
 import os
 from pathlib import Path
 
 import joblib
+import mlflow
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
@@ -43,6 +46,48 @@ def check_dataset(dataset_path: str | Path = DATASET_PATH) -> str:
 def train_model(
     dataset_path: str | Path = DATASET_PATH,
     model_path: str | Path = MODEL_PATH,
+) -> str:
+    """Track a training run and retain the existing model-path return value."""
+    log_buffer = io.StringIO()
+    run_log_handler = logging.StreamHandler(log_buffer)
+    run_log_handler.setLevel(logging.INFO)
+    previous_logger_level = logger.level
+    logger.setLevel(logging.INFO)
+    logger.addHandler(run_log_handler)
+
+    try:
+        tracking_uri = os.environ.get(
+            "MLFLOW_TRACKING_URI",
+            f"sqlite:///{PROJECT_DIRECTORY / 'mlflow.db'}",
+        )
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(
+            os.environ.get("MLFLOW_EXPERIMENT_NAME", "flight-price-prediction")
+        )
+        with mlflow.start_run(run_name="flight-price-training"):
+            try:
+                mlflow.set_tag("task", "regression")
+                mlflow.set_tag("dataset", Path(dataset_path).name)
+                mlflow.log_params(
+                    {
+                        "test_size": 0.2,
+                        "random_state": 42,
+                        "cross_validation_folds": 5,
+                        "scaler": "StandardScaler",
+                        "selected_model": "RandomForest",
+                    }
+                )
+                return _train_model(dataset_path, model_path)
+            finally:
+                mlflow.log_text(log_buffer.getvalue(), "logs/training.log")
+    finally:
+        logger.removeHandler(run_log_handler)
+        logger.setLevel(previous_logger_level)
+
+
+def _train_model(
+    dataset_path: str | Path,
+    model_path: str | Path,
 ) -> str:
     """Run the notebook's preprocessing, evaluation, tuning, and save steps."""
     dataset_path = Path(dataset_path).expanduser().resolve()
@@ -95,12 +140,17 @@ def train_model(
     results = []
     for name, model in models.items():
         logger.info("Training baseline model: %s", name)
-        model.fit(X_train, y_train)
-        prediction = model.predict(X_test)
-        mse = mean_squared_error(y_test, prediction)
-        rmse = np.sqrt(mse)
-        mae = mean_absolute_error(y_test, prediction)
-        r2 = r2_score(y_test, prediction)
+        with mlflow.start_run(run_name=f"baseline-{name}", nested=True):
+            mlflow.log_params(model.get_params())
+            model.fit(X_train, y_train)
+            prediction = model.predict(X_test)
+            mse = mean_squared_error(y_test, prediction)
+            rmse = np.sqrt(mse)
+            mae = mean_absolute_error(y_test, prediction)
+            r2 = r2_score(y_test, prediction)
+            mlflow.log_metrics(
+                {"mse": mse, "rmse": rmse, "mae": mae, "r2": r2}
+            )
         results.append(
             {"Model": name, "MSE": mse, "RMSE": rmse, "MAE": mae, "R2 Score": r2}
         )
@@ -114,6 +164,9 @@ def train_model(
         )
     results_df = pd.DataFrame(results)
     logger.info("Baseline model comparison:\n%s", results_df.to_string(index=False))
+    mlflow.log_text(
+        results_df.to_csv(index=False), "reports/baseline_model_comparison.csv"
+    )
 
     logger.info("Starting 5-fold shuffled cross-validation for Linear Regression")
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -144,6 +197,15 @@ def train_model(
 
     cv_df = pd.DataFrame(fold_results)
     logger.info("Cross-validation fold results:\n%s", cv_df.to_string(index=False))
+    mlflow.log_text(cv_df.to_csv(index=False), "reports/linear_regression_cv.csv")
+    mlflow.log_metrics(
+        {
+            f"linear_regression_cv_{metric}_mean": value
+            for metric, value in cv_df[["MSE", "RMSE", "MAE", "R2"]]
+            .mean()
+            .items()
+        }
+    )
     logger.info(
         "Cross-validation average scores:\n%s",
         cv_df[["MSE", "RMSE", "MAE", "R2"]].mean().to_string(),
@@ -170,11 +232,26 @@ def train_model(
     best_models = {}
     for name, (model, param_grid) in tuning_configs.items():
         logger.info("Starting GridSearchCV for %s with parameters %s", name, param_grid)
-        grid = GridSearchCV(model, param_grid, cv=5, scoring="r2", n_jobs=-1)
-        grid.fit(X_train, y_train)
+        with mlflow.start_run(run_name=f"tuned-{name}", nested=True):
+            mlflow.log_params(
+                {f"grid_{key}": str(value) for key, value in param_grid.items()}
+            )
+            grid = GridSearchCV(model, param_grid, cv=5, scoring="r2", n_jobs=-1)
+            grid.fit(X_train, y_train)
 
-        best_model = grid.best_estimator_
-        prediction = best_model.predict(X_test)
+            best_model = grid.best_estimator_
+            prediction = best_model.predict(X_test)
+            test_metrics = {
+                "mse": mean_squared_error(y_test, prediction),
+                "rmse": np.sqrt(mean_squared_error(y_test, prediction)),
+                "mae": mean_absolute_error(y_test, prediction),
+                "r2": r2_score(y_test, prediction),
+            }
+            mlflow.log_params(
+                {f"best_{key}": value for key, value in grid.best_params_.items()}
+            )
+            mlflow.log_metric("cv_r2_mean", grid.best_score_)
+            mlflow.log_metrics(test_metrics)
         best_models[name] = best_model
         tuning_results.append(
             {
@@ -196,16 +273,32 @@ def train_model(
 
     tuning_df = pd.DataFrame(tuning_results)
     logger.info("Tuned model comparison:\n%s", tuning_df.to_string(index=False))
+    mlflow.log_text(tuning_df.to_csv(index=False), "reports/tuned_model_comparison.csv")
 
     best_rf_model = best_models["RandomForest"]
     random_forest_result = tuning_df[tuning_df["Model"] == "RandomForest"].iloc[0]
     logger.info("Selected best model: %s", best_rf_model)
     logger.info("Selected model parameters: %s", best_rf_model.get_params())
     logger.info("Selected model test R2 score: %s", random_forest_result["R2_Test"])
+    mlflow.log_metrics(
+        {
+            "selected_model_test_mse": random_forest_result["MSE_Test"],
+            "selected_model_test_rmse": random_forest_result["RMSE_Test"],
+            "selected_model_test_mae": random_forest_result["MAE_Test"],
+            "selected_model_test_r2": random_forest_result["R2_Test"],
+            "selected_model_cv_r2_mean": random_forest_result["CV_R2_Mean"],
+        }
+    )
 
     model_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Saving the best model to %s", model_path)
     joblib.dump(best_rf_model, model_path)
+    mlflow.sklearn.log_model(
+        best_rf_model,
+        name="best-flight-price-model",
+        input_example=X_test[:1],
+    )
+    mlflow.log_artifact(str(model_path), artifact_path="model-files")
 
     logger.info("Loading the saved model for the notebook's sanity check")
     loaded_model = joblib.load(model_path)
@@ -218,6 +311,7 @@ def train_model(
         }
     )
     logger.info("Sanity check results:\n%s", sanity_check.to_string(index=False))
+    mlflow.log_text(sanity_check.to_csv(index=False), "reports/sanity_check.csv")
     avg_error = abs(sanity_check["Difference"]).mean()
     logger.info("Average absolute error on unseen data: %.2f", avg_error)
     logger.info("Model saved and verified successfully at %s", model_path)
