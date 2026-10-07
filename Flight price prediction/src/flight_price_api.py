@@ -6,6 +6,7 @@ Flight Price Predictor - Flask REST API + HTML UI
 import logging
 import os
 from datetime import date
+from pathlib import Path
 import joblib
 import pandas as pd
 from flask import Flask, render_template_string, request, jsonify
@@ -15,7 +16,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 # --- App settings ---------------------------------------------------------
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "best_flight_price_model.joblib")
+PROJECT_DIRECTORY = Path(__file__).resolve().parent.parent
+MODEL_PATH = os.environ.get(
+    "FLIGHT_PRICE_MODEL_PATH",
+    str(PROJECT_DIRECTORY / "artifacts" / "best_flight_price_model.joblib"),
+)
 HOST = "0.0.0.0"
 PORT = 8000
 

@@ -1,2 +1,7 @@
 __pycache__/
 *.py[cod]
+.DS_Store
+/Flight price prediction/airflow.cfg
+/Flight price prediction/airflow.db*
+/Flight price prediction/logs/
+/Flight price prediction/simple_auth_manager_passwords.json.generated

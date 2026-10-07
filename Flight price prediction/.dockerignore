@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.git/
+Flight_Price_Prediction.ipynb
+k8s/
+logs/

@@ -4,4 +4,28 @@ services:
     image: flight-price-predictor:latest
     ports:
       - "8000:8000"
+    volumes:
+      - ./artifacts:/app/artifacts
     restart: unless-stopped
+
+  airflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    image: flight-price-airflow:latest
+    command: standalone
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      FLIGHT_PRICE_DATASET_PATH: /opt/DATA/flights.csv
+    volumes:
+      - airflow-data:/opt/airflow
+      - ./dags:/opt/airflow/dags:ro
+      - ./src:/opt/airflow/src:ro
+      - ./artifacts:/opt/airflow/artifacts
+      - ../DATA:/opt/DATA:ro
+    restart: unless-stopped
+
+volumes:
+  airflow-data:

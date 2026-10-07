@@ -12,8 +12,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Only these two files are needed at runtime.
-COPY flight_price_api.py best_flight_price_model.joblib ./
+# Keep application code separate from the persisted model artifact.
+COPY src/ ./src/
+COPY artifacts/ ./artifacts/
+ENV FLIGHT_PRICE_MODEL_PATH=/app/artifacts/best_flight_price_model.joblib
 
 EXPOSE 8000
 
@@ -21,5 +23,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
 
-# Gunicorn is a production WSGI server. It imports `app` from flight_price_api.py.
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "120", "flight_price_api:app"]
+# Gunicorn is a production WSGI server. It imports the Flask app from src.
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "120", "src.flight_price_api:app"]
