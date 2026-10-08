@@ -4,6 +4,9 @@ An end-to-end flight-price regression project with model training, MLflow
 experiment tracking, an Airflow workflow, and a Flask prediction API. Run the
 stack locally with Docker Compose or deploy the API to Kubernetes.
 
+For the full walkthrough of the REST API, Docker, Kubernetes, Airflow, CI/CD,
+and MLflow stages, see [MLOPS_WORKFLOW.md](MLOPS_WORKFLOW.md).
+
 ## Requirements
 
 - Docker Desktop for the full application stack
