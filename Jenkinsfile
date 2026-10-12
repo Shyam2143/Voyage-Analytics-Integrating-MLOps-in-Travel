@@ -57,23 +57,15 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
-                    sh '''
-                        set -eux
-                        export PATH="$WORKSPACE/bin:$PATH"
-
-                        if ! command -v kubectl >/dev/null 2>&1; then
-                            mkdir -p "$WORKSPACE/bin"
-                            curl -fsSL -o "$WORKSPACE/bin/kubectl" "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-                            chmod +x "$WORKSPACE/bin/kubectl"
-                        fi
-
-                        test -s "$KUBECONFIG"
-                        kubectl --kubeconfig "$KUBECONFIG" config view --minify
-                        kubectl --kubeconfig "$KUBECONFIG" cluster-info
-                        kubectl --kubeconfig "$KUBECONFIG" set image deployment/flight-price-api flight-price-api="$IMAGE_NAME:$IMAGE_TAG"
-                        kubectl --kubeconfig "$KUBECONFIG" rollout status deployment/flight-price-api --timeout=120s
-                    '''
+                script {
+                    if (env.KUBECONFIG) {
+                        sh '''
+                            kubectl --kubeconfig "$KUBECONFIG" set image deployment/flight-price-api flight-price-api="$IMAGE_NAME:$IMAGE_TAG"
+                            kubectl --kubeconfig "$KUBECONFIG" rollout status deployment/flight-price-api --timeout=120s
+                        '''
+                    } else {
+                        echo 'Skipping Kubernetes deploy: no kubeconfig configured in Jenkins.'
+                    }
                 }
             }
         }
