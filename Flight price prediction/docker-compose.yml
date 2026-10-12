@@ -12,6 +12,8 @@ services:
       - sqlite:////mlflow/mlflow.db
       - --artifacts-destination
       - /mlflow/artifacts
+      - --allowed-hosts
+      - mlflow:5000,localhost:5001,127.0.0.1:5001
     ports:
       - "5001:5000"
     volumes:
