@@ -59,6 +59,7 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
                     sh '''
+                        set -eux
                         export PATH="$WORKSPACE/bin:$PATH"
 
                         if ! command -v kubectl >/dev/null 2>&1; then
@@ -67,8 +68,11 @@ pipeline {
                             chmod +x "$WORKSPACE/bin/kubectl"
                         fi
 
-                        kubectl set image deployment/flight-price-api flight-price-api="$IMAGE_NAME:$IMAGE_TAG"
-                        kubectl rollout status deployment/flight-price-api --timeout=120s
+                        test -s "$KUBECONFIG"
+                        kubectl --kubeconfig "$KUBECONFIG" config view --minify
+                        kubectl --kubeconfig "$KUBECONFIG" cluster-info
+                        kubectl --kubeconfig "$KUBECONFIG" set image deployment/flight-price-api flight-price-api="$IMAGE_NAME:$IMAGE_TAG"
+                        kubectl --kubeconfig "$KUBECONFIG" rollout status deployment/flight-price-api --timeout=120s
                     '''
                 }
             }
